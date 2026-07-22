@@ -1,6 +1,14 @@
 server:
   port: 8081
 
+seata:
+  tx-service-group: hmall
+  service:
+    vgroup-mapping:
+      hmall: "default"
+    grouplist:
+      default: localhost:8091
+
 spring:
   cloud:
     nacos:
