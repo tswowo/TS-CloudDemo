@@ -12,6 +12,14 @@ spring:
       discovery:
         server-addr: ${hm.nacos.host}:${hm.nacos.port}
 
+seata:
+  tx-service-group: hmall
+  service:
+    vgroup-mapping:
+      hmall: "default"
+    grouplist:
+      default: localhost:8091
+
 feign:
   okhttp:
     enabled: true
@@ -19,6 +27,8 @@ feign:
     enabled: true # 开启feign对sentinel的支持
 
 hm:
+  cart:
+    max-items: 10
   db:
     host: ${hm.db.host}
     port: ${hm.db.port}
