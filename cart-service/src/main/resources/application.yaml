@@ -1,5 +1,10 @@
 server:
   port: 8082
+  tomcat:
+    threads:
+      max: 50 # 允许的最大线程数
+    accept-count: 50 # 最大排队等待数量
+    max-connections: 100 # 允许的最大连接
 
 spring:
   cloud:
@@ -10,6 +15,8 @@ spring:
 feign:
   okhttp:
     enabled: true
+  sentinel:
+    enabled: true # 开启feign对sentinel的支持
 
 hm:
   db:
