@@ -2,11 +2,13 @@ package com.hmall.trade.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmall.common.exception.BadRequestException;
+import com.hmall.common.utils.RabbitMqHelper;
 import com.hmall.common.utils.UserContext;
 import com.hmall.hmapi.client.CartClient;
 import com.hmall.hmapi.client.ItemClient;
 import com.hmall.hmapi.dto.ItemDTO;
 import com.hmall.hmapi.dto.OrderDetailDTO;
+import com.hmall.trade.constants.MqConstants;
 import com.hmall.trade.domain.dto.OrderFormDTO;
 import com.hmall.trade.domain.po.Order;
 import com.hmall.trade.domain.po.OrderDetail;
@@ -15,6 +17,8 @@ import com.hmall.trade.service.IOrderDetailService;
 import com.hmall.trade.service.IOrderService;
 import lombok.RequiredArgsConstructor;
 import io.seata.spring.annotation.GlobalTransactional;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,11 +39,14 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements IOrderService {
 
     private final ItemClient itemClient;
     private final IOrderDetailService detailService;
     private final CartClient cartClient;
+    private final RabbitTemplate rabbitTemplate;
+    private final OrderMapper orderMapper;
 
     @Override
     @Transactional
@@ -85,16 +92,44 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         } catch (Exception e) {
             throw new RuntimeException("库存不足！");
         }
+
+        //发送延迟消息，校验订单支付状态
+        log.info("发送延迟消息，校验订单支付状态");
+        RabbitMqHelper mq=new RabbitMqHelper(rabbitTemplate);
+        mq.sendDelayMessage(MqConstants.ORDER_EXCHANGE_NAME, MqConstants.DELAY_ORDER_KEY,order.getId(),20000);
+
         return order.getId();
     }
 
     @Override
     public void markOrderPaySuccess(Long orderId) {
+        Order curOrder = this.getById(orderId);
+        if (curOrder == null || curOrder.getStatus() != 1) {
+            return;
+        }
         Order order = new Order();
         order.setId(orderId);
         order.setStatus(2);
         order.setPayTime(LocalDateTime.now());
         updateById(order);
+    }
+
+    @Override
+    @Transactional
+    public void cancelOrder(Long orderId) {
+        Order curOrder = this.getById(orderId);
+        if (curOrder == null || curOrder.getStatus() != 1) {
+            return;
+        }
+        // 标记订单状态为已关闭
+        Order order = new Order();
+        order.setId(orderId);
+        order.setStatus(5);
+        order.setUpdateTime(LocalDateTime.now());
+        updateById(order);
+        // 恢复扣减的库存
+        List<OrderDetailDTO> items = orderMapper.queryOrderItemsByOrderId(orderId);
+        itemClient.restoreStock(items);
     }
 
     private List<OrderDetail> buildDetails(Long orderId, List<ItemDTO> items, Map<Long, Integer> numMap) {
