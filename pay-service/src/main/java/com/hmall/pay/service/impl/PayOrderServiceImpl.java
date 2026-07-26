@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmall.common.exception.BizIllegalException;
 import com.hmall.common.utils.BeanUtils;
+import com.hmall.common.utils.RabbitMqHelper;
 import com.hmall.common.utils.UserContext;
 import com.hmall.hmapi.client.OrderClient;
 import com.hmall.hmapi.client.UserClient;
@@ -68,7 +69,8 @@ public class PayOrderServiceImpl extends ServiceImpl<PayOrderMapper, PayOrder> i
         // 5.修改订单状态
         try {
             log.info("支付成功，发送消息给订单服务消息队列,订单id:{}", po.getBizOrderNo());
-            rabbitTemplate.convertAndSend("pay.direct", "pay.success", po.getBizOrderNo());
+            RabbitMqHelper mq=new RabbitMqHelper(rabbitTemplate);
+            mq.sendMessage("pay.direct", "pay.success", po.getBizOrderNo());
         } catch (Exception e) {
             log.error("支付服务发送消息失败,订单id:{}", po.getBizOrderNo());
         }

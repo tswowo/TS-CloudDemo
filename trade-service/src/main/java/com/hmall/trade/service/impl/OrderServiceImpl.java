@@ -2,6 +2,7 @@ package com.hmall.trade.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmall.common.exception.BadRequestException;
+import com.hmall.common.utils.RabbitMqHelper;
 import com.hmall.common.utils.UserContext;
 import com.hmall.hmapi.client.CartClient;
 import com.hmall.hmapi.client.ItemClient;
@@ -94,11 +95,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         //发送延迟消息，校验订单支付状态
         log.info("发送延迟消息，校验订单支付状态");
-        rabbitTemplate.convertAndSend(MqConstants.ORDER_EXCHANGE_NAME, MqConstants.DELAY_ORDER_KEY,
-                order.getId(), message -> {
-                    message.getMessageProperties().setDelay(20000);
-                    return message;
-                });
+        RabbitMqHelper mq=new RabbitMqHelper(rabbitTemplate);
+        mq.sendDelayMessage(MqConstants.ORDER_EXCHANGE_NAME, MqConstants.DELAY_ORDER_KEY,order.getId(),20000);
 
         return order.getId();
     }
