@@ -32,6 +32,11 @@ public class ItemClientFallback implements FallbackFactory<ItemClient> {
             public void restoreStock(List<OrderDetailDTO> items) {
                 throw new BizIllegalException(cause);
             }
+
+            @Override
+            public ItemDTO queryItemById(Long id) {
+                throw new BizIllegalException(cause);
+            }
         };
     }
 }
