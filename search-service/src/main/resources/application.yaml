@@ -1,0 +1,21 @@
+server:
+  port: 8086
+
+seata:
+  tx-service-group: hmall
+  service:
+    vgroup-mapping:
+      hmall: "default"
+    grouplist:
+      default: localhost:8091
+
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${hm.nacos.host}:${hm.nacos.port}
+
+hm:
+  swagger:
+    title: "黑马商城搜索管理接口文档"
+    package: com.hmall.search.controller

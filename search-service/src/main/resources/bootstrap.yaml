@@ -4,11 +4,11 @@
 #    vgroup-mapping:
 #      hmall: "default"
 #    grouplist:
-#      default: localhost:8091
+#      default: localhost:8096
 
 spring:
   application:
-    name: cart-service
+    name: search-service
   profiles:
     active: dev
   cloud:
@@ -19,6 +19,7 @@ spring:
         shared-configs: # 共享配置
           - dataId: shared-jdbc.yaml # 共享mybatis配置
           - dataId: shared-log.yaml # 共享日志配置
-          - dataId: shared-swagger.yaml # 共享日志配置
+          - dataId: shared-swagger.yaml # 共享swagger配置
+          - dataId: shared-rabbitmq.yaml # 共享rabbitmq配置
 #          - dataId: shared-sentinel.yaml # 共享sentinel配置
 #          - dataId: shared-seata.yaml # 共享seata配置
