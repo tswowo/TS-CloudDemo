@@ -34,3 +34,5 @@ target/
 /item-service/logs/item-service/spring.log
 /item-service/logs/item-service/spring.log.2026-08-02.0.gz
 /item-service/logs/
+/search-service/src/main/resources/application-dev.yaml
+/search-service/src/main/resources/application-local.yaml
