@@ -3,13 +3,16 @@ package com.hmall.item.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmall.common.exception.BizIllegalException;
 import com.hmall.common.utils.BeanUtils;
+import com.hmall.item.annotation.ItemSync;
 import com.hmall.item.domain.dto.ItemDTO;
 import com.hmall.item.domain.dto.OrderDetailDTO;
 import com.hmall.item.domain.po.Item;
+import com.hmall.item.enums.Operation;
 import com.hmall.item.mapper.ItemMapper;
 import com.hmall.item.service.IItemService;
 import org.springframework.stereotype.Service;
 
+import java.io.Serializable;
 import java.util.Collection;
 import java.util.List;
 
@@ -22,6 +25,24 @@ import java.util.List;
  */
 @Service
 public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements IItemService {
+
+    @Override
+    @ItemSync(operation = Operation.SAVE)
+    public boolean save(Item entity) {
+        return super.save(entity);
+    }
+
+    @Override
+    @ItemSync(operation = Operation.UPDATE)
+    public boolean updateById(Item entity) {
+        return super.updateById(entity);
+    }
+
+    @Override
+    @ItemSync(operation = Operation.DELETE)
+    public boolean removeById(Serializable id) {
+        return super.removeById(id);
+    }
 
     @Override
     public void deductStock(List<OrderDetailDTO> items) {
