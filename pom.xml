@@ -38,6 +38,7 @@
         <mybatis-plus.version>3.4.3</mybatis-plus.version>
         <hutool.version>5.8.11</hutool.version>
         <mysql.version>8.0.23</mysql.version>
+        <elasticsearch.version>7.12.1</elasticsearch.version>
     </properties>
 
     <!-- 对依赖包进行管理 -->
@@ -83,6 +84,12 @@
                 <artifactId>hutool-all</artifactId>
                 <version>${hutool.version}</version>
             </dependency>
+            <!--elasticsearch-->
+            <dependency>
+                <groupId>org.elasticsearch.client</groupId>
+                <artifactId>elasticsearch-rest-high-level-client</artifactId>
+                <version>${elasticsearch.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     <dependencies>
@@ -113,11 +120,13 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-bootstrap</artifactId>
         </dependency>
-        <!--seata-->
+        <!--seata
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-seata</artifactId>
         </dependency>
+        -->
+
         <!--amqp-->
         <dependency>
             <groupId>org.springframework.boot</groupId>

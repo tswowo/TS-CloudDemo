@@ -31,3 +31,6 @@ target/
 /docs/本地开发环境重启指南.md
 /hm-gateway/src/main/resources/application-dev.yaml
 /hm-gateway/src/main/resources/application-local.yaml
+/item-service/logs/item-service/spring.log
+/item-service/logs/item-service/spring.log.2026-08-02.0.gz
+/item-service/logs/
