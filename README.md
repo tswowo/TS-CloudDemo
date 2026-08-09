@@ -1,6 +1,6 @@
 # hmall — 黑马商城 Spring Cloud 微服务学习项目
 
-一个完整的 Spring Cloud 微服务电商项目，从单体架构逐步演进到微服务体系，涵盖服务拆分、注册发现、远程调用、网关路由、认证鉴权、配置中心等核心知识点。
+一个完整的 Spring Cloud 微服务电商项目，从单体架构逐步演进到微服务体系，涵盖服务拆分、注册发现、远程调用、网关路由、认证鉴权、配置中心、限流熔断、分布式事务、消息队列、搜索引擎等核心知识点。
 
 ## 技术栈
 
@@ -16,19 +16,24 @@
 | 工具库 | Hutool | 5.8.11 |
 | 认证 | JWT (jks) | - |
 | 数据库 | MySQL | 8.x |
+| 消息队列 | RabbitMQ | 3.x |
+| 搜索引擎 | Elasticsearch | 7.12.1 |
+| 限流熔断 | Sentinel | - |
+| 分布式事务 | Seata | - |
 
 ## 模块结构
 
 ```
 hmall/
-├── hm-gateway/       # 网关服务 (8080) — 统一入口、路由转发、JWT 鉴权
-├── hm-api/           # API 契约模块 — Feign Client 接口 + DTO
-├── hm-common/        # 公共模块 — 异常处理、拦截器、工具类、ThreadLocal
-├── item-service/     # 商品服务 — 商品查询、搜索、库存扣减
-├── cart-service/     # 购物车服务 (8082) — 购物车 CRUD、上限控制（热更新）
+├── hm-gateway/       # 网关服务 — 统一入口、路由转发、JWT 鉴权
+├── hm-api/           # API模块 — Feign Client 接口 + DTO + Fallback
+├── hm-common/        # 公共模块 — 异常处理、拦截器、工具类、MQ/RabbitMqHelper
+├── item-service/     # 商品服务 — 商品 CRUD、库存扣减、AOP 索引同步
+├── search-service/   # 搜索服务 — Elasticsearch 搜索、索引管理
+├── cart-service/     # 购物车服务 — 购物车 CRUD、上限控制（热更新）
 ├── user-service/     # 用户服务 — 登录注册、JWT 签发、地址管理
-├── trade-service/    # 交易服务 — 订单创建、订单查询、物流
-├── pay-service/      # 支付服务 — 支付单管理、支付状态
+├── trade-service/    # 交易服务 — 订单创建、支付状态监听、延迟校验取消
+├── pay-service/      # 支付服务 — 支付单管理、MQ 异步通知
 ├── hm-service/       # 原始单体服务（已废弃，保留作为参考）
 ├── docs/             # 文档与重启指南
 └── logs/             # 各服务日志目录
@@ -36,7 +41,7 @@ hmall/
 
 ## 学习路线（按 Git 提交演进）
 
-整个项目的 18 次提交形成了一条清晰的微服务学习路径。以下按阶段逐一介绍。
+整个项目的 30+ 次提交形成了一条清晰的微服务学习路径。以下按阶段逐一介绍。
 
 ---
 
@@ -494,6 +499,406 @@ public class DynamicRouteLoader {
 
 ---
 
+### 阶段十一：Sentinel 限流熔断 — Feign 容错保护
+
+**提交**: `78ec31d` / `aa0484d` / `35ee121` / `e9432eb`
+
+引入 Sentinel 对微服务间的 Feign 调用做限流和熔断保护，并通过 `FallbackFactory` 实现服务降级。
+
+**Sentinel 接入步骤**：
+
+1. 父 POM 引入 `spring-cloud-starter-alibaba-sentinel`
+2. cart-service 中开启 `feign.sentinel.enabled: true`
+3. 为每个 Feign Client 编写 `FallbackFactory`，在远程调用失败时执行降级逻辑
+
+```java
+// FallbackFactory 示例 — ItemClient 的降级策略
+@Slf4j
+public class ItemClientFallback implements FallbackFactory<ItemClient> {
+    @Override
+    public ItemClient create(Throwable cause) {
+        return new ItemClient() {
+            @Override
+            public List<ItemDTO> queryItemByIds(Collection<Long> ids) {
+                log.error("远程调用ItemClient#queryItemByIds出现异常，参数：{}", ids, cause);
+                return CollUtils.emptyList();  // 查询降级 → 返回空列表
+            }
+            @Override
+            public void deductStock(List<OrderDetailDTO> items) {
+                throw new BizIllegalException(cause);  // 写操作降级 → 抛业务异常
+            }
+            // ... 其他方法同理
+        };
+    }
+}
+```
+
+6 个 Feign Client 全部配备了 FallbackFactory：`ItemClientFallback`、`CartClientFallback`、`OrderClientFallback`、`PayClientFallback`、`SearchClientFallback`、`UserClientFallback`。
+
+**降级策略设计原则**：
+
+| 操作类型 | 降级策略 | 原因 |
+|---|---|---|
+| 查询（读） | 返回空列表/空对象 | 保证主流程不中断，牺牲部分数据 |
+| 扣减/写入 | 抛 `BizIllegalException` | 数据一致性优先——不确定是否成功时不能静默吞掉 |
+
+对比：
+- **Sentinel 核心能力**：流量控制（QPS/线程数限流）、熔断降级（慢调用比例/异常比例）、系统自适应保护。Sentinel 的规则在控制台配置，实时生效，比 Hystrix 的代码侵入更低
+- **Sentinel vs Hystrix**：Hystrix 已停止维护，Sentinel 是阿里开源的主力项目，控制台 UI 更友好
+- **FallbackFactory vs Fallback**：`FallbackFactory` 可以获取异常原因（`Throwable cause`），`Fallback` 只能返回降级对象。前者可以做差异化降级，后者代码更简洁
+
+知识点：
+- Sentinel 的**控制台**（dashboard）与客户端是**拉模式**——客户端主动向控制台注册心跳，控制台推送规则到客户端
+- `feign.sentinel.enabled`：开启后 Feign 生成的代理会被 Sentinel 包装，每次调用经过 Sentinel 的 Slot Chain
+- `@SentinelResource`：可以用注解定义资源点和 fallback/handler，但 Feign 的降级直接用 `FallbackFactory` 更自然
+
+难点：
+- Sentinel 控制台默认**不持久化**规则到磁盘——重启后规则丢失。生产环境需要接入 Nacos/ZooKeeper 等外部数据源
+- 当前 shared-sentinel.yaml 在 Nacos 中被注释掉了（临时关闭），启用时需要取消注释 bootstrap.yaml 中的引用
+
+---
+
+### 阶段十二：Seata 分布式事务 — 跨服务数据一致性
+
+**提交**: `d7a4093` / `0c229b7` / `35ee121` / `80e0bce`
+
+引入 Seata 管理跨微服务的事务——典型场景是下单流程涉及 trade-service（订单）、cart-service（购物车）、item-service（库存）三个服务。
+
+```java
+// trade-service: OrderServiceImpl.createOrder()
+@Transactional  // 本地事务
+// @GlobalTransactional(timeoutMills = 300000, name = "createOrder")  // 分布式事务（已注释）
+public Long createOrder(OrderFormDTO orderFormDTO) {
+    // 1. 创建订单（本地 DB）
+    save(order);
+    // 2. 清理购物车（远程 → cart-service）
+    cartClient.deleteCartItemByIds(itemIdsList);
+    // 3. 扣减库存（远程 → item-service）
+    itemClient.deductStock(detailDTOS);
+    // 4. 发送延迟消息
+    mq.sendDelayMessage(...);
+}
+```
+
+**Seata XA 模式**：
+
+```yaml
+seata:
+  tx-service-group: hmall
+  service:
+    vgroup-mapping:
+      hmall: "default"
+    grouplist:
+      default: localhost:8091  # Seata TC 地址
+```
+
+XA 模式下，Seata 将业务 SQL 与 XA 协议绑定，分两阶段提交：
+1. **阶段一（Prepare）**：各服务执行 SQL，XA 资源管理器将事务置于"预提交"状态（数据已写入但未提交）
+2. **阶段二（Commit/Rollback）**：TC 根据全局事务结果通知各 RM 统一提交或回滚
+
+对比 Seata 的四种事务模式：
+
+| 模式 | 核心机制 | 优点 | 缺点 |
+|---|---|---|---|
+| **AT** | 自动回滚日志（undo_log 表） | 无侵入，性能较好 | 需要 undo_log 表，依赖数据库 |
+| **XA** | XA 协议（RM 配合） | 强一致性，无数据脏读 | 性能开销大，需要数据库支持 XA |
+| **TCC** | Try-Confirm-Cancel 三阶段 | 无锁，性能最好 | 代码侵入大，需手写补偿逻辑 |
+| **Saga** | 正向服务 + 补偿服务 | 长事务友好 | 补偿逻辑复杂 |
+
+**TC 端的 Docker 网络问题（提交 `0c229b7`）**：Seata TC 部署在 Docker 中，Nacos 中注册的是 Docker 内网桥接 IP。本地开发时无法通过 Docker 网桥 IP 直连 TC，解决方案是将 `grouplist` 中的 TC 地址指向 `localhost`，通过 SSH 隧道转发到云服务器的 Seata 服务。
+
+知识点：
+- **`@GlobalTransactional` vs `@Transactional`**：前者管理分布式事务（Seata TC 协调），后者管理本地事务（数据库连接级别的 commit/rollback）。`@GlobalTransactional` 的 timeout 应长于所有子事务的 timeout 之和
+- **事务传播的隐性依赖**：下单 → 清购物车 → 扣库存，中间任何一个失败都要回滚。不使用分布式事务时，可能出现"库存扣了但购物车没清"的不一致状态
+- 对比 **消息队列最终一致性**（下个阶段）：Seata 追求**强一致性**（ACID），MQ 追求**最终一致性**（BASE）
+
+难点：
+- **XA 的性能**：两阶段提交期间资源被锁定，高并发下会成为瓶颈。实际生产通常用 AT 模式（自动回滚日志 + 全局锁）替代
+- 当前 Seata 依赖和 `@GlobalTransactional` 注解均处于**注释状态**——因为后续引入了 RabbitMQ 的最终一致性方案，强一致分布式事务的需求降低
+
+---
+
+### 阶段十三：RabbitMQ 消息队列 — 异步通信与最终一致性
+
+**提交**: `f862b38` / `2f0d11b` / `1bfa001` / `ba1397c` / `ef9fe77` / `3559890` / `502c875`
+
+这是整个项目最核心的一次架构升级——用消息队列替代同步 Feign 调用，将支付-订单链路从**同步耦合**改造为**异步解耦**。
+
+**MQ 消息拓扑总览**：
+
+```
+                    ┌──────────────────────────────┐
+                    │         RabbitMQ              │
+                    │                               │
+                    │  ┌─────────────┐              │
+  item-service ────┼─►│ item.direct  │──► search-service
+  (@ItemSync)       │  │ key: save    │   (索引同步)
+       │            │  │ key: delete  │              │
+       │            │  └─────────────┘              │
+       │            │                               │
+       │            │  ┌─────────────┐              │
+       │            │  │ pay.direct   │              │
+  pay-service ──────┼─►│ key: success │──► trade-service
+  (支付成功)         │  └─────────────┘   (标记订单已支付)
+                    │                               │
+                    │  ┌────────────────────┐       │
+                    │  │ trade.delay.direct  │       │
+  trade-service ────┼─►│ (delayed exchange)  │──► trade-service
+  (下单后20s)        │  │ key: delay.query    │   (校验是否支付)
+                    │  └────────────────────┘       │
+                    │                               │
+                    │  ┌─────────────┐              │
+                    │  │ error.direct │              │
+                    │  │ key: svc名   │──► error.queue
+                    │  └─────────────┘   (消费失败→死信)
+                    └──────────────────────────────┘
+```
+
+**1. 消息序列化配置**（`MqConfig`）：
+
+```java
+@Configuration
+@ConditionalOnClass(RabbitTemplate.class)
+public class MqConfig {
+    @Bean
+    public MessageConverter messageConverter() {
+        return new Jackson2JsonMessageConverter();
+    }
+}
+```
+
+对比默认的 `SimpleMessageConverter`：Java 内置序列化（`ObjectInputStream`/`ObjectOutputStream`）体积大、不可读、跨语言困难。Jackson JSON 序列化体积小、可读、跨语言友好。
+
+**2. RabbitMqHelper 工具类**（封装 `RabbitTemplate`）：
+
+```java
+public class RabbitMqHelper {
+    private final RabbitTemplate rabbitTemplate;
+
+    // 普通消息发送
+    public void sendMessage(String exchange, String routingKey, Object msg)
+
+    // 延迟消息（依赖 rabbitmq_delayed_message_exchange 插件）
+    public void sendDelayMessage(String exchange, String routingKey, Object msg, int delay)
+
+    // 带 ConfirmCallback 的可靠发送（超时返回 false）
+    public boolean sendMessageWithConfirm(String exchange, String routingKey, Object msg, int timeoutSeconds)
+}
+```
+
+`sendMessageWithConfirm` 通过 `CorrelationData` + `CompletableFuture.get(timeout)` 实现**同步确认**：发送消息后阻塞等待 Broker 返回 ack/nack，超时或 nack 返回 false。这是**生产者端的可靠性保证**。
+
+**3. 支付异步通知**（pay-service → trade-service）：
+
+支付成功后不再通过 Feign 同步调用 `orderClient.markOrderPaySuccess()`，而是发送 MQ 消息：
+
+```java
+// PayOrderServiceImpl.tryPayOrderByBalance()
+mq.sendMessage("pay.direct", "pay.success", po.getBizOrderNo());
+```
+
+trade-service 的 `PayStatusListener.listenPaySuccess` 消费此消息，标记订单已支付。
+
+**为什么改成异步？**
+- Feign 同步调用依赖 trade-service 的可用性——如果 trade-service 挂了，支付成功的状态无法传递，订单永远停在"未支付"
+- MQ 消息有持久化和重试机制——即使消费方临时不可用，消息也不会丢失，恢复后继续消费
+- 支付服务的 RT（响应时间）不再包含订单状态更新的耗时
+
+**4. 延迟消息校验——订单超时取消**（trade-service ← → trade-service）：
+
+订单创建后，trade-service 立即发送一条 **20 秒延迟消息**：
+
+```java
+// OrderServiceImpl.createOrder()
+mq.sendDelayMessage("trade.delay.direct", "delay.order.query", order.getId(), 20000);
+```
+
+20 秒后消息到达 `PayStatusListener.listenOrderDelayMessage`，消费方校验订单支付状态：
+- 已支付 → 标记支付成功
+- 未支付 → 取消订单 + 恢复库存（`itemClient.restoreStock()`）
+
+```
+时间线：
+t=0s    订单创建，发送 20s 延迟消息
+t=15s   用户支付成功 → pay-service 发送 pay.success 消息
+        → trade-service 标记支付成功
+t=20s   延迟消息到达 → 检查订单状态 → 已支付，跳过取消
+```
+
+对比传统**定时任务轮询**：轮询间隔短→数据库压力大；间隔长→用户等太久。延迟消息精准、实时、省资源。
+
+**5. 消费失败的重试与死信机制**（`MqConsumeErrorAutoConfig`）：
+
+```java
+@Configuration
+@ConditionalOnProperty(name = "spring.rabbitmq.listener.simple.retry.enabled", havingValue = "true")
+public class MqConsumeErrorAutoConfig {
+    // 为每个微服务创建独立的 error queue: {serviceName}.error.queue
+    // 绑定到 error.direct exchange，routing key = serviceName
+    // 使用 RepublishMessageRecoverer：消费重试全部失败后 → 转发到 error.direct
+}
+```
+
+**关键设计**：死信队列是**按服务名动态创建**的——每个服务启动时自动声明自己的 error queue 并绑定到 `error.direct`。这样运维人员只需监控 `error.direct` 交换机下的死信，定位到具体服务名即可。
+
+知识点：
+- **Direct Exchange vs Delayed Exchange**：`pay.direct` 是普通直连交换机（立即投递），`trade.delay.direct` 使用了 `rabbitmq_delayed_message_exchange` 插件（按 delay 字段延迟投递）。延迟消息在 Broker 内存中暂存，到期后才路由到队列
+- **消费确认机制**：默认自动 ack（`auto`），改为手动 ack（`manual`）可在消费成功后才确认，失败时 requeue 或不确认
+- **幂等性**：MQ 可能重复投递（网络超时重试 + 没有 ack），消费方必须做幂等处理。`listenPaySuccess` 中检查 `status != 1` 就是幂等保护
+- 对比 **Kafka**：RabbitMQ 更适合业务消息（灵活的路由、优先级队列、延迟消息），Kafka 更适合海量日志/流数据处理
+
+难点：
+- **RabbitMQ 插件的部署**：`rabbitmq_delayed_message_exchange` 不是内置的，需要在 RabbitMQ 服务器上手动安装 `.ez` 文件，版本必须与 RabbitMQ 版本严格对应
+- **消息可靠性**：`sendMessage` 使用普通的 `convertAndSend`，没有 ConfirmCallback——如果 Broker 挂了消息直接丢失。关键业务（如支付成功通知）需要改成 `sendMessageWithConfirm`
+- **延迟消息的时机权衡**：20 秒太短 → 用户在支付页面没操作完订单就被取消了；太长 → 库存被长时间占用不释放
+
+---
+
+### 阶段十四：Elasticsearch 搜索 — 从数据库查询到搜索引擎
+
+**提交**: `7105776` / `d448f0b` / `73251ab` / `e447cdb` / `4ac59e1` / `54027b2` / `a49c47c`
+
+将搜索功能从 item-service 的 MySQL 模糊查询迁移到独立的 search-service，底层使用 Elasticsearch 7.12.1，支持全文搜索、高亮、聚合过滤、广告加权和索引同步。
+
+**为什么要迁移到 Elasticsearch？**
+
+MySQL 的 `LIKE '%keyword%'` 无法使用索引（最左前缀失效），全表扫描在百万级商品数据下性能极差。Elasticsearch 基于**倒排索引**（Inverted Index），将文档中的词映射到文档 ID，搜索时直接定位，时间复杂度与文档总数无关。
+
+```yaml
+# search-service: application.yaml
+hm:
+  es:
+    uri: http://localhost:19200
+```
+
+**1. RestHighLevelClient 配置**（`ElasticsearchConfig`）：
+
+```java
+@Bean
+@ConfigurationProperties(prefix = "hm.es")
+public EsProperties esProperties() { return new EsProperties(); }
+
+@Bean(destroyMethod = "close")
+public RestHighLevelClient restHighLevelClient(EsProperties properties) {
+    return new RestHighLevelClient(RestClient.builder(
+            HttpHost.create(properties.getUri())));
+}
+```
+
+`destroyMethod = "close"` 确保应用关闭时释放 HTTP 连接。
+
+**2. 搜索核心实现**（`SearchServiceImpl.searchFromEsByCondition`）：
+
+```java
+// BoolQuery：多条件组合
+BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+boolQuery.must(QueryBuilders.matchQuery("name", query.getKey()));      // 全文匹配
+boolQuery.filter(QueryBuilders.termQuery("category", query.getCategory())); // 精确过滤
+boolQuery.filter(QueryBuilders.termQuery("brand", query.getBrand()));
+boolQuery.filter(QueryBuilders.rangeQuery("price").gte(min).lte(max)); // 范围过滤
+
+// FunctionScoreQuery：广告商品加权
+FunctionScoreQueryBuilder functionScoreQuery = QueryBuilders.functionScoreQuery(
+    boolQuery,
+    new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{
+        new FunctionScoreQueryBuilder.FilterFunctionBuilder(
+            QueryBuilders.termQuery("isAD", true),  // 广告商品
+            ScoreFunctionBuilders.weightFactorFunction(100)  // 权重 × 100
+        )
+    }
+);
+
+// Highlight：高亮显示匹配的关键词
+SearchSourceBuilder.highlight()
+    .field("name").preTags("<em>").postTags("</em>");
+```
+
+搜索流程：关键词 matchQuery → boolQuery 过滤（品类/品牌/价格）→ function_score 加权（广告位提升）→ 分页排序 → 高亮结果解析。
+
+**3. 聚合过滤**（`getFilters`）：
+
+```java
+// Terms Aggregation — 对 brand 和 category 字段做分组统计
+request.source().aggregation(
+    AggregationBuilders.terms("brand_agg").field("brand").size(10)
+);
+```
+
+ES 的聚合查询比 MySQL 的 `SELECT DISTINCT` + `GROUP BY` 在去重计数上快得多——ES 在内存中使用**列式存储**结构做聚合，不需要回表。
+
+**4. AOP + MQ 实现数据库与索引库同步**：
+
+```
+item-service (MySQL)                    search-service (ES)
+    │                                        │
+    │ @ItemSync(SAVE)                        │
+    ├── ItemSyncAspect (AOP后置通知)         │
+    │   ├── 查询保存后的完整商品对象           │
+    │   ├── 转换为 ItemDoc                    │
+    │   └── MQ.sendMsg("item.direct",        │
+    │         "item.save", itemDoc) ────MQ───► ItemSyncListener
+    │                                        │   ├── IndexRequest("items")
+    │                                        │   └── client.index(request)
+    │                                        │
+    │ @ItemSync(DELETE)                      │
+    └── MQ.sendMsg("item.direct",            │
+              "item.delete", itemId) ──MQ───► ItemSyncListener
+                                             │   ├── DeleteRequest("items")
+                                             └─── client.delete(request)
+```
+
+```java
+// 自定义注解
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+public @interface ItemSync {
+    Operation operation(); // SAVE, UPDATE, DELETE
+}
+
+// AOP 切面：@AfterReturning 后置通知
+@Aspect @Component
+public class ItemSyncAspect {
+    @AfterReturning("@annotation(itemSync)")
+    public void handleItemSync(JoinPoint joinPoint, ItemSync itemSync) {
+        // DELETE → item.direct / item.delete → 发 id
+        // SAVE/UPDATE → item.direct / item.save → 发 ItemDoc
+    }
+}
+```
+
+**为什么用 MQ 而非直接 Feign 调用 ES 写入？**
+- **解耦**：item-service 不需要知道 search-service 的存在，不持有 ES Client 依赖
+- **容错**：MQ 消息可持久化和重试，ES 暂时不可用时数据不丢失
+- **削峰**：商品批量导入时大量写入请求排队，MQ 平滑处理
+
+**5. `_id` 修复**（提交 `a49c47c`）：
+
+测试批量导入时，ItemDoc 中虽然设置了 `id` 字段，但 ES 通过 JSON body 不认业务 id，会自动生成随机 `_id`。修复方式是在 `IndexRequest` 上显式设置文档 ID：
+
+```java
+// 修复前
+new IndexRequest("items").source(json, XContentType.JSON);  // ES 自动生成随机 _id
+
+// 修复后
+new IndexRequest("items").id(itemDoc.getId()).source(json, XContentType.JSON);  // 使用业务 id
+```
+
+**重点**：ES 的文档 `_id` 和 JSON body 中的 `id` 字段是两回事——`_id` 是 ES 元数据（主键），body 中的 `id` 只是索引字段。不加 `.id()` 的话 ES 给每个文档生成随机 UUID，导致同一商品可能被重复索引多次。
+
+知识点：
+- **倒排索引**：词 → 文档列表的映射。搜索"手机"→ 找到包含"手机"的所有文档 ID → 返回。比 MySQL 的 B+Tree 全表扫描快数个数量级
+- **TF-IDF / BM25**：ES 的默认相关性评分算法。TF（词频）× IDF（逆文档频率）决定文档与查询的匹配程度
+- **Function Score Query**：在 BM25 评分基础上叠加自定义权重（如广告加权），实现业务排序干预
+- **ES 近实时（Near Real-Time）**：写入后默认 1 秒后可搜索到（refresh_interval），不是实时但对商品搜索场景足够
+- 对比 **Canal**（阿里的 MySQL Binlog 同步工具）：Canal 监听 MySQL Binlog 自动写 ES，完全解耦业务代码；AOP + MQ 方式更轻量、不依赖 Canal Server，但需要在业务代码中加注解
+
+难点：
+- **索引库与数据库的最终一致性**：MQ 消息可能丢失或重复，消费端要做幂等（IndexRequest 的 id 天然幂等——同一 id 多次写入就是覆盖更新）。但**消息积压**时索引库会暂时落后于数据库
+- **ES 的内存**：聚合查询在内存中构建全局桶，数据量大时可能 OOM。需要设置合理的 `size` 参数和关闭不需要的 `fielddata`
+- **高亮结果解析**：highlight 返回的是分词的 fragment 数组，需要拼接后替换原文；如果分词导致高亮片段不完整，需要前后文补全逻辑
+
+---
+
 ## 系统架构总览
 
 ```
@@ -515,43 +920,55 @@ public class DynamicRouteLoader {
                     │  - 配置中心     │
                     └───────┬───────┘
                             │
-        ┌───────┬───────────┼───────────┬───────────┐
-        │       │           │           │           │
-        ▼       ▼           ▼           ▼           ▼
-   ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-   │  item  │ │  cart  │ │  user  │ │ trade  │ │  pay   │
-   │service │ │service │ │service │ │service │ │service │
-   └────┬───┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
-        │         │          │          │          │
-        │    ┌────┴──────────┴──────────┴──────────┘
-        │    │          Feign 调用链
-        │    │    (通过 hm-api 的 Client 接口)
-        │    │    携带 user-info Header
-        ▼    ▼
-   ┌────────────────────────────────────────┐
-   │              MySQL 数据库                │
-   │  hm-item / hm-cart / hm-user / hm-trade │
-   │  hm-pay / hmall                         │
-   └────────────────────────────────────────┘
+      ┌───────┬───────┬─────┼─────┬───────┬───────┐
+      │       │       │     │     │       │       │
+      ▼       ▼       ▼     ▼     ▼       ▼       ▼
+ ┌────────┐┌──────┐┌────┐┌────┐┌────┐┌────────┐┌───────┐
+ │  item  ││search││cart││user││trade││  pay   ││   MQ  │
+ │service ││svc   ││svc ││svc ││svc  ││service ││(Rabbit)│
+ └───┬────┘└──┬───┘└──┬─┘└──┬─┘└──┬─┘└───┬────┘└───┬───┘
+     │        │       │     │     │       │        │
+     │   ┌────┘       │     │     │       │        │
+     │   │            │     │     │       │        │
+     ▼   ▼            ▼     ▼     ▼       ▼        ▼
+ ┌──────┐  ┌────────────────────────────┐  ┌──────────┐
+ │  ES  │  │        MySQL 数据库          │  │ 延迟消息  │
+ │"items"│  │ hm-item/hm-user/hm-trade    │  │ 死信队列  │
+ └──────┘  │ hm-cart/hm-pay/hmall        │  └──────────┘
+           └────────────────────────────┘
 ```
+
+**交互方式总结**：
+
+| 方式 | 场景 | 示例 |
+|---|---|---|
+| Feign 同步调用 | 查询类、强依赖 | cart → item 查商品信息 |
+| Feign 同步调用 | 事务性写操作 | trade → item 扣库存 |
+| MQ 异步消息 | 状态通知 | pay → trade 支付成功通知 |
+| MQ 延迟消息 | 超时校验 | trade → trade 20s 后校验支付状态 |
+| MQ 异步消息 | 数据同步 | item → search ES 索引同步 |
 
 ## 启动方式
 
 1. **启动 Nacos**（本地 18848 端口，或修改 `bootstrap.yaml` 中的地址）
 2. **启动 MySQL**，执行各模块对应的数据库初始化脚本
-3. **按顺序启动服务**：
+3. **启动 Elasticsearch**（搜索功能依赖，默认端口 19200）
+4. **启动 RabbitMQ**（消息队列功能依赖）
+5. **按顺序启动服务**：
    ```
-   item-service → cart-service → user-service → trade-service → pay-service → gateway
+   item-service → search-service → cart-service → user-service → trade-service → pay-service → gateway
    ```
-4. **访问** `http://localhost:8080`
+6. **访问** `http://localhost:8080`
 
 所有服务的启动顺序和重启方法参见 `docs/本地开发环境重启指南.md`。
 
 ## 可选改进方向
 
-- **Sentinel 限流熔断**：在 Gateway 层面加流控规则，防止瞬时流量打垮下游服务
-- **分布式事务**：交易下单涉及 cart + item + trade 三个服务，Seata 或消息队列最终一致性
-- **链路追踪**：Sleuth + Zipkin 将 userId 和 TraceId 串联，方便排查跨服务问题
-- **增量路由更新**：DynamicRouteLoader 目前是全量替换，改为 diff 后增量更新
+- **Sentinel 规则持久化**：当前规则存储在内存中，重启丢失——可接入 Nacos 作为 Sentinel 的数据源，实现规则持久化和动态生效
+- **Seata AT 模式替换 XA**：XA 模式的高并发性能瓶颈——可改用 AT 模式（undo_log 自动回滚），在一致性和性能间取得更好平衡
+- **消息可靠发送**：`pay.success` 等关键消息改用 `sendMessageWithConfirm` + 数据库本地消息表，确保支付通知不丢失
+- **链路追踪**：Sleuth + Zipkin 将 userId 和 TraceId 串联，方便排查跨服务问题（MQ 消息传递 TraceId 是额外挑战）
+- **增量路由更新**：DynamicRouteLoader 目前是全量替换，改为 diff 后增量更新，减少路由抖动
 - **契约测试**：hm-api 的 Feign 接口与实际 Controller 之间加 Spring Cloud Contract 验证
-- **容器化部署**：已有 Dockerfile（hm-service），可扩展到全部服务 + Docker Compose 编排
+- **ES 升级**：`RestHighLevelClient` 在 7.15.0 已标记废弃，后续可迁移到新的 `ElasticsearchClient`（Java API Client），支持 lambda 表达式构建查询
+- **容器化部署**：扩展到全部服务 + Docker Compose 编排（MySQL + Nacos + RabbitMQ + ES + 全部微服务）
