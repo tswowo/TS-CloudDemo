@@ -48,12 +48,13 @@ class EsDocTest {
                     .page(Page.of(pageNo, pageSize));
             List<Item> itemDTOList = page.getRecords();
             if (itemDTOList == null || itemDTOList.isEmpty()) {
-                return;
+                break;
             }
             BulkRequest request = new BulkRequest();
             for (Item item : itemDTOList) {
                 ItemDoc itemDoc = new ItemDoc();
                 BeanUtils.copyProperties(item, itemDoc);
+                itemDoc.setId(item.getId().toString());
                 request.add(new IndexRequest("items")
                         .id(itemDoc.getId())
                         .source(JSONUtil.toJsonStr(itemDoc), XContentType.JSON));
