@@ -16,6 +16,8 @@ spring:
         server-addr: ${hm.nacos.host}:${hm.nacos.port}
 
 hm:
+  es:
+    uri: http://localhost:19200
   swagger:
     title: "黑马商城搜索管理接口文档"
     package: com.hmall.search.controller
