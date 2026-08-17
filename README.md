@@ -1,4 +1,4 @@
-# hmall — 黑马商城 Spring Cloud 微服务学习项目
+# tscloud — 云商城 Spring Cloud 微服务学习项目
 
 一个完整的 Spring Cloud 微服务电商项目，从单体架构逐步演进到微服务体系，涵盖服务拆分、注册发现、远程调用、网关路由、认证鉴权、配置中心、限流熔断、分布式事务、消息队列、搜索引擎等核心知识点。
 
@@ -24,17 +24,16 @@
 ## 模块结构
 
 ```
-hmall/
-├── hm-gateway/       # 网关服务 — 统一入口、路由转发、JWT 鉴权
-├── hm-api/           # API模块 — Feign Client 接口 + DTO + Fallback
-├── hm-common/        # 公共模块 — 异常处理、拦截器、工具类、MQ/RabbitMqHelper
+tscloud/
+├── gateway-service/       # 网关服务 — 统一入口、路由转发、JWT 鉴权
+├── api-service/           # API模块 — Feign Client 接口 + DTO + Fallback
+├── common/        # 公共模块 — 异常处理、拦截器、工具类、MQ/RabbitMqHelper
 ├── item-service/     # 商品服务 — 商品 CRUD、库存扣减、AOP 索引同步
 ├── search-service/   # 搜索服务 — Elasticsearch 搜索、索引管理
 ├── cart-service/     # 购物车服务 — 购物车 CRUD、上限控制（热更新）
 ├── user-service/     # 用户服务 — 登录注册、JWT 签发、地址管理
 ├── trade-service/    # 交易服务 — 订单创建、支付状态监听、延迟校验取消
 ├── pay-service/      # 支付服务 — 支付单管理、MQ 异步通知
-├── hm-service/       # 原始单体服务（已废弃，保留作为参考）
 ├── docs/             # 文档与重启指南
 └── logs/             # 各服务日志目录
 ```
@@ -58,7 +57,7 @@ hmall/
 - JWT 无状态认证的基本流程：登录签发 token → 请求携带 token → 拦截器校验
 
 难点：
-- JWT 签名文件 `hmall.jks` 的生成和管理——需要用 JDK 自带的 `keytool` 命令生成密钥库
+- JWT 签名文件 `tscloud.jks` 的生成和管理——需要用 JDK 自带的 `keytool` 命令生成密钥库
 - Spring Security 配置的自定义 Filter 链注入
 
 ---
@@ -90,7 +89,7 @@ public interface ItemClient {
 
 > **提交 `41db124`**: 修复 OkHttp 连接池依赖丢失
 
-在抽取 hm-api 时误删了 OkHttp 依赖，导致 Feign 静默降级为 `HttpURLConnection`。**重点**：连接池失效不会报错，只会让每次请求都新建连接，高并发下产生大量 `TIME_WAIT` 状态连接，性能急剧下降。排查时可通过日志查看 Feign 实际使用的 Client 类型。
+在抽取 api-service 时误删了 OkHttp 依赖，导致 Feign 静默降级为 `HttpURLConnection`。**重点**：连接池失效不会报错，只会让每次请求都新建连接，高并发下产生大量 `TIME_WAIT` 状态连接，性能急剧下降。排查时可通过日志查看 Feign 实际使用的 Client 类型。
 
 > **提交 `ac9257b`**: 拆分支付模块（pay-service）和交易模块（trade-service）
 
@@ -116,16 +115,16 @@ public interface ItemClient {
 
 **提交**: `88771b4` — 封装 Client 和 DTO 为单独 API 模块
 
-将 Feign Client 接口和 DTO 从 cart-service 抽取到独立的 `hm-api` 模块，任何需要调用其他服务的模块只需依赖 hm-api。
+将 Feign Client 接口和 DTO 从 cart-service 抽取到独立的 `api-service` 模块，任何需要调用其他服务的模块只需依赖 api-service。
 
 ```
 之前：cart-service 内部有一份 ItemClient.java + ItemDTO.java（副本）
       item-service 内部有原始定义
       → 两边各自维护，容易不一致
 
-之后：hm-api 是唯一的真相来源
-      cart-service ──依赖──▶ hm-api（含 ItemClient + ItemDTO）
-      item-service ──依赖──▶ hm-api（共享同一份 DTO 定义）
+之后：api-service 是唯一的真相来源
+      cart-service ──依赖──▶ api-service（含 ItemClient + ItemDTO）
+      item-service ──依赖──▶ api-service（共享同一份 DTO 定义）
 ```
 
 知识点：
@@ -134,8 +133,8 @@ public interface ItemClient {
 - 对比 **BFF 模式**：对于学习项目规模，API 模块足够；大项目可能需要 GraphQL 或独立的 API Gateway 做 BFF 层
 
 难点：
-- hm-api 需要保持**向后兼容**——改 DTO 字段会影响所有消费方
-- 模块依赖方向：`hm-api` 是最底层（不依赖任何业务模块），被所有需要远程调用的模块依赖
+- api-service 需要保持**向后兼容**——改 DTO 字段会影响所有消费方
+- 模块依赖方向：`api-service` 是最底层（不依赖任何业务模块），被所有需要远程调用的模块依赖
 
 ---
 
@@ -143,7 +142,7 @@ public interface ItemClient {
 
 **提交**: `d17f69e` / `2525dfc` — 部署数据库和 Nacos 到云服务器
 
-配置外部化调整：数据库端口从硬编码 `3306` 改为 `${hm.db.port:3306}`（占位符 + 默认值），移除 Nacos 认证配置（云上内网部署未开启认证）。
+配置外部化调整：数据库端口从硬编码 `3306` 改为 `${ts.db.port:3306}`（占位符 + 默认值），移除 Nacos 认证配置（云上内网部署未开启认证）。
 
 知识点：
 - **配置外部化**：不同环境（本地/测试/生产）的差异通过占位符 `${var:default}` 处理，启动时传入环境变量或 profiles 覆盖
@@ -288,10 +287,10 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 }
 ```
 
-同时，`hm-common` 新增了 `UserInfoInterceptor`（Spring MVC HandlerInterceptor），用于在下游微服务中接收网关传递的 `user-info` 请求头，存入 `UserContext`（ThreadLocal）。
+同时，`common` 新增了 `UserInfoInterceptor`（Spring MVC HandlerInterceptor），用于在下游微服务中接收网关传递的 `user-info` 请求头，存入 `UserContext`（ThreadLocal）。
 
 ```java
-// hm-common 中的拦截器
+// common 中的拦截器
 public class UserInfoInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, ...) {
         String userInfo = request.getHeader("user-info");
@@ -317,13 +316,13 @@ public class MvcConfig implements WebMvcConfigurer { ... }
 知识点：
 - **网关认证 vs 服务认证**：网关做**认证**（Authentication = 验证你是谁），微服务做**鉴权**（Authorization = 校验你能做什么）。网关只验证 JWT 有效性，不关心用户权限细节
 - **AntPathMatcher**：Ant 风格路径匹配（`/search/**`、`/users/login`），比正则更直观
-- `@ConditionalOnClass`：hm-common 同时被 Gateway（WebFlux）和 MVC 服务引用时，避免 WebFlux 环境加载 Servlet API 报错
+- `@ConditionalOnClass`：common 同时被 Gateway（WebFlux）和 MVC 服务引用时，避免 WebFlux 环境加载 Servlet API 报错
 - 对比 **Spring Security OAuth2**：更重但功能完整（授权码模式、客户端模式）；手写 JWT 过滤器更轻量、灵活
 
 难点：
 - Gateway 用 `ServerWebExchange.mutate()` 修改请求（不可变模式），不能直接 `request.getHeaders().add()`
 - ThreadLocal 的 `removeUser()` 在 `afterCompletion` 中执行——即使业务代码抛异常也会回调，保证不泄漏
-- 密钥文件 `hmall.jks` 需要在 gateway 和 user-service 各存一份（签发在 user-service，校验在 gateway）
+- 密钥文件 `tscloud.jks` 需要在 gateway 和 user-service 各存一份（签发在 user-service，校验在 gateway）
 
 ---
 
@@ -389,20 +388,20 @@ public RequestInterceptor userInfoInterceptor() {
 bootstrap.yaml（最早加载）            application.yaml（后加载）
 ├── Nacos 连接信息                     ├── server.port
 ├── file-extension: yaml               ├── Nacos discovery
-└── shared-configs:                    └── hm.* 业务变量
+└── shared-configs:                    └── ts.* 业务变量
     ├── shared-jdbc.yaml
     ├── shared-log.yaml
     └── shared-swagger.yaml
 
 Nacos 中的 cart-service-dev.yaml：
-    hm.cart.maxItems: 10  ← 购物车上限配置
+    ts.cart.maxItems: 10  ← 购物车上限配置
 ```
 
 热更新通过 `@ConfigurationProperties` 实现，**无需 `@RefreshScope`**：
 
 ```java
 @Data
-@ConfigurationProperties(prefix = "hm.cart")
+@ConfigurationProperties(prefix = "ts.cart")
 @Component
 public class CartProperties {
     private Integer maxItems;  // Nacos 中修改此值，Bean 自动 rebind
@@ -486,7 +485,7 @@ public class DynamicRouteLoader {
 
 | | 动态路由（本阶段） | 动态配置（阶段九） |
 |---|---|---|
-| **更新目标** | 路由表（基础设施） | 业务参数（hm.cart.maxItems） |
+| **更新目标** | 路由表（基础设施） | 业务参数（ts.cart.maxItems） |
 | **实现方式** | Nacos Listener + `RouteDefinitionWriter` | `@ConfigurationProperties` 自动 rebind |
 | **代码量** | 需要手动管理删除/写入 | 只需声明 Bean |
 | **粒度** | 整张路由表替换 | 单个属性更新 |
@@ -584,10 +583,10 @@ public Long createOrder(OrderFormDTO orderFormDTO) {
 
 ```yaml
 seata:
-  tx-service-group: hmall
+  tx-service-group: tscloud
   service:
     vgroup-mapping:
-      hmall: "default"
+      tscloud: "default"
     grouplist:
       default: localhost:8091  # Seata TC 地址
 ```
@@ -766,7 +765,7 @@ MySQL 的 `LIKE '%keyword%'` 无法使用索引（最左前缀失效），全表
 
 ```yaml
 # search-service: application.yaml
-hm:
+ts:
   es:
     uri: http://localhost:19200
 ```
@@ -775,7 +774,7 @@ hm:
 
 ```java
 @Bean
-@ConfigurationProperties(prefix = "hm.es")
+@ConfigurationProperties(prefix = "ts.es")
 public EsProperties esProperties() { return new EsProperties(); }
 
 @Bean(destroyMethod = "close")
@@ -933,8 +932,8 @@ new IndexRequest("items").id(itemDoc.getId()).source(json, XContentType.JSON);  
      ▼   ▼            ▼     ▼     ▼       ▼        ▼
  ┌──────┐  ┌────────────────────────────┐  ┌──────────┐
  │  ES  │  │        MySQL 数据库          │  │ 延迟消息  │
- │"items"│  │ hm-item/hm-user/hm-trade    │  │ 死信队列  │
- └──────┘  │ hm-cart/hm-pay/hmall        │  └──────────┘
+ │"items"│  │ item-service/user-service/trade-service│  │ 死信队列  │
+ └──────┘  │ cart-service/pay-service/tscloud        │  └──────────┘
            └────────────────────────────┘
 ```
 
@@ -969,6 +968,6 @@ new IndexRequest("items").id(itemDoc.getId()).source(json, XContentType.JSON);  
 - **消息可靠发送**：`pay.success` 等关键消息改用 `sendMessageWithConfirm` + 数据库本地消息表，确保支付通知不丢失
 - **链路追踪**：Sleuth + Zipkin 将 userId 和 TraceId 串联，方便排查跨服务问题（MQ 消息传递 TraceId 是额外挑战）
 - **增量路由更新**：DynamicRouteLoader 目前是全量替换，改为 diff 后增量更新，减少路由抖动
-- **契约测试**：hm-api 的 Feign 接口与实际 Controller 之间加 Spring Cloud Contract 验证
+- **契约测试**：api-service 的 Feign 接口与实际 Controller 之间加 Spring Cloud Contract 验证
 - **ES 升级**：`RestHighLevelClient` 在 7.15.0 已标记废弃，后续可迁移到新的 `ElasticsearchClient`（Java API Client），支持 lambda 表达式构建查询
 - **容器化部署**：扩展到全部服务 + Docker Compose 编排（MySQL + Nacos + RabbitMQ + ES + 全部微服务）

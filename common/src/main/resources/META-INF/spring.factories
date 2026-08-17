@@ -1,0 +1,7 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+  com.tscloud.common.config.MyBatisConfig,\
+  com.tscloud.common.config.JsonConfig,\
+  com.tscloud.common.config.MqConfig,\
+  com.tscloud.common.config.MvcConfig,\
+  com.tscloud.common.config.MqConsumeErrorAutoConfig,\
+  com.tscloud.common.config.RedisConfig

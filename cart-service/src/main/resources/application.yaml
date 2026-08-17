@@ -10,13 +10,13 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${hm.nacos.host}:${hm.nacos.port}
+        server-addr: ${ts.nacos.host}:${ts.nacos.port}
 
 seata:
-  tx-service-group: hmall
+  tx-service-group: tscloud
   service:
     vgroup-mapping:
-      hmall: "default"
+      tscloud: "default"
     grouplist:
       default: localhost:8091
 
@@ -26,14 +26,14 @@ feign:
   sentinel:
     enabled: true # 开启feign对sentinel的支持
 
-hm:
+ts:
   cart:
     max-items: 10
   db:
-    host: ${hm.db.host}
-    port: ${hm.db.port}
-    pw: ${hm.db.pw}
-    database: ${hm.db.database}
+    host: ${ts.db.host}
+    port: ${ts.db.port}
+    pw: ${ts.db.pw}
+    database: ${ts.db.database}
   swagger:
-    title: "黑马商城购物车服务接口文档"
-    package: com.hm.cart.controller
+    title: "云商城购物车服务接口文档"
+    package: com.tscloud.cart.controller

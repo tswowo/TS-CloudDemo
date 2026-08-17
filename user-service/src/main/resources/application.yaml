@@ -5,18 +5,18 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${hm.nacos.host}:${hm.nacos.port}
+        server-addr: ${ts.nacos.host}:${ts.nacos.port}
 
 feign:
   okhttp:
     enabled: true
 
-hm:
+ts:
   jwt:
-    location: classpath:hmall.jks
-    alias: hmall
-    password: hmall123
+    location: classpath:tscloud.jks
+    alias: tscloud
+    password: tscloud123
     tokenTTL: 30m
   swagger:
-    title: "黑马商城用户管理接口文档"
-    package: com.hmall.user.controller
+    title: "云商城用户管理接口文档"
+    package: com.tscloud.user.controller

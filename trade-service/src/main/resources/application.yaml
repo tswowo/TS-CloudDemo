@@ -5,13 +5,13 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${hm.nacos.host}:${hm.nacos.port}
+        server-addr: ${ts.nacos.host}:${ts.nacos.port}
 
 feign:
   okhttp:
     enabled: true
 
-hm:
+ts:
   swagger:
-    title: "黑马商城交易管理接口文档"
-    package: com.hmall.trade.controller
+    title: "云商城交易管理接口文档"
+    package: com.tscloud.trade.controller

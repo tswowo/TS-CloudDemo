@@ -2,10 +2,10 @@ server:
   port: 8086
 
 seata:
-  tx-service-group: hmall
+  tx-service-group: tscloud
   service:
     vgroup-mapping:
-      hmall: "default"
+      tscloud: "default"
     grouplist:
       default: localhost:8091
 
@@ -13,11 +13,11 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${hm.nacos.host}:${hm.nacos.port}
+        server-addr: ${ts.nacos.host}:${ts.nacos.port}
 
-hm:
+ts:
   es:
     uri: http://localhost:19200
   swagger:
-    title: "黑马商城搜索管理接口文档"
-    package: com.hmall.search.controller
+    title: "云商城搜索管理接口文档"
+    package: com.tscloud.search.controller

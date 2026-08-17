@@ -1,0 +1,23 @@
+server:
+  port: 8080
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${ts.nacos.host}:${ts.nacos.port}
+ts:
+  jwt:
+    location: classpath:tscloud.jks
+    alias: tscloud
+    password: tscloud123
+    tokenTTL: 30m
+  auth:
+    excludePaths:
+      - /search/**
+      - /users/login
+      - /users/admin/login
+      - /items/**
+      - /hi
+    adminPaths:
+      - /orders/page
+      - /upload/**

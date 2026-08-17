@@ -2,10 +2,10 @@ server:
   port: 8081
 
 seata:
-  tx-service-group: hmall
+  tx-service-group: tscloud
   service:
     vgroup-mapping:
-      hmall: "default"
+      tscloud: "default"
     grouplist:
       default: localhost:8091
 
@@ -13,17 +13,17 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${hm.nacos.host}:${hm.nacos.port}
+        server-addr: ${ts.nacos.host}:${ts.nacos.port}
   redis:
     host: localhost
     port: 6379
 
-hm:
+ts:
   swagger:
-    title: "黑马商城商品管理接口文档"
-    package: com.hmall.item.controller
+    title: "云商城商品管理接口文档"
+    package: com.tscloud.item.controller
   oss:
     endpoint: oss-cn-hangzhou.aliyuncs.com
-    accessKeyId: ${HM_OSS_ACCESS_KEY_ID:}
-    accessKeySecret: ${HM_OSS_ACCESS_KEY_SECRET:}
-    bucketName: ${HM_OSS_BUCKET:}
+    accessKeyId: ${TS_OSS_ACCESS_KEY_ID:}
+    accessKeySecret: ${TS_OSS_ACCESS_KEY_SECRET:}
+    bucketName: ${TS_OSS_BUCKET:}

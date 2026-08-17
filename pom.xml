@@ -4,21 +4,20 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.heima</groupId>
-    <artifactId>hmall</artifactId>
+    <groupId>com.tscloud</groupId>
+    <artifactId>ts-cloud-demo</artifactId>
     <packaging>pom</packaging>
     <version>1.0.0</version>
     <modules>
-        <module>hm-common</module>
-        <module>hm-service</module>
+        <module>common</module>
         <module>item-service</module>
         <module>cart-service</module>
         <module>user-service</module>
         <module>trade-service</module>
         <module>pay-service</module>
         <module>search-service</module>
-        <module>hm-gateway</module>
-        <module>hm-api</module>
+        <module>gateway-service</module>
+        <module>api-service</module>
     </modules>
 
     <parent>
@@ -63,8 +62,8 @@
             </dependency>
             <!--common-->
             <dependency>
-                <groupId>com.heima</groupId>
-                <artifactId>hm-common</artifactId>
+                <groupId>com.tscloud</groupId>
+                <artifactId>common</artifactId>
                 <version>1.0.0</version>
             </dependency>
             <!-- 数据库驱动包管理 -->

@@ -1,8 +1,8 @@
 #seata:
-#  tx-service-group: hmall
+#  tx-service-group: tscloud
 #  service:
 #    vgroup-mapping:
-#      hmall: "default"
+#      tscloud: "default"
 #    grouplist:
 #      default: localhost:8096
 
