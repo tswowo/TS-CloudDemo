@@ -26,10 +26,11 @@ public class JwtTool {
      * @param userDTO 用户信息
      * @return access-token
      */
-    public String createToken(Long userId, Duration ttl) {
+    public String createToken(Long userId, Integer role, Duration ttl) {
         // 1.生成jws
         return JWT.create()
                 .setPayload("user", userId)
+                .setPayload("role", role)
                 .setExpiresAt(new Date(System.currentTimeMillis() + ttl.toMillis()))
                 .setSigner(jwtSigner)
                 .sign();

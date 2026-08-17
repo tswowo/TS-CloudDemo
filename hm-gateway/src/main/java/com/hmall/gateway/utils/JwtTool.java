@@ -79,4 +79,21 @@ public class JwtTool {
             throw new UnauthorizedException("无效的token");
         }
     }
+
+    /**
+     * 解析 token 中的角色。调用方需先 parseToken 校验 token 有效性；
+     * 旧 token 无 role 字段时返回 null（视为无角色）。
+     */
+    public Integer parseRole(String token) {
+        JWT jwt = JWT.of(token).setSigner(jwtSigner);
+        Object rolePayload = jwt.getPayload("role");
+        if (rolePayload == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(rolePayload.toString());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
 }

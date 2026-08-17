@@ -17,5 +17,7 @@ public interface IUserService extends IService<User> {
 
     UserLoginVO login(LoginFormDTO loginFormDTO);
 
+    UserLoginVO adminLogin(LoginFormDTO loginFormDTO);
+
     void deductMoney(String pw, Integer totalFee);
 }

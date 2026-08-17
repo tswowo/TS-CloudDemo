@@ -37,6 +37,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     private final JwtProperties jwtProperties;
 
+    /** 角色常量：1 普通用户，2 商户 */
+    private static final Integer ROLE_USER = 1;
+    private static final Integer ROLE_ADMIN = 2;
+
     @Override
     public UserLoginVO login(LoginFormDTO loginDTO) {
         // 1.数据校验
@@ -53,13 +57,41 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (!passwordEncoder.matches(password, user.getPassword())) {
             throw new BadRequestException("用户名或密码错误");
         }
-        // 5.生成TOKEN
-        String token = jwtTool.createToken(user.getId(), jwtProperties.getTokenTTL());
+        // 5.生成TOKEN（C端登录签发普通用户角色）
+        String token = jwtTool.createToken(user.getId(), ROLE_USER, jwtProperties.getTokenTTL());
         // 6.封装VO返回
         UserLoginVO vo = new UserLoginVO();
         vo.setUserId(user.getId());
         vo.setUsername(user.getUsername());
         vo.setBalance(user.getBalance());
+        vo.setRole(ROLE_USER);
+        vo.setToken(token);
+        return vo;
+    }
+
+    @Override
+    public UserLoginVO adminLogin(LoginFormDTO loginDTO) {
+        // 与 C 端登录共用的校验链路，额外要求商户角色
+        String username = loginDTO.getUsername();
+        String password = loginDTO.getPassword();
+        User user = lambdaQuery().eq(User::getUsername, username).one();
+        Assert.notNull(user, "用户名错误");
+        if (user.getStatus() == UserStatus.FROZEN) {
+            throw new ForbiddenException("用户被冻结");
+        }
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new BadRequestException("用户名或密码错误");
+        }
+        // 商户角色校验：普通用户账号不能登录管理端
+        if (!ROLE_ADMIN.equals(user.getRole())) {
+            throw new ForbiddenException("非商户账号，无权登录管理端");
+        }
+        String token = jwtTool.createToken(user.getId(), ROLE_ADMIN, jwtProperties.getTokenTTL());
+        UserLoginVO vo = new UserLoginVO();
+        vo.setUserId(user.getId());
+        vo.setUsername(user.getUsername());
+        vo.setBalance(user.getBalance());
+        vo.setRole(ROLE_ADMIN);
         vo.setToken(token);
         return vo;
     }

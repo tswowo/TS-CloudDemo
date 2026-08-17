@@ -85,6 +85,12 @@
             <artifactId>spring-rabbit</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!--Redis依赖（provided：由使用方引入完整 starter）-->
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-redis</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <!--json处理-->
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>

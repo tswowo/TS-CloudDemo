@@ -1,6 +1,8 @@
 package com.hmall.trade.controller;
 
 import com.hmall.common.utils.BeanUtils;
+import com.hmall.common.domain.PageDTO;
+import com.hmall.common.domain.PageQuery;
 import com.hmall.trade.domain.dto.OrderFormDTO;
 import com.hmall.trade.domain.vo.OrderVO;
 import com.hmall.trade.service.IOrderService;
@@ -22,6 +24,13 @@ public class OrderController {
     @GetMapping("{id}")
     public OrderVO queryOrderById(@Param ("订单id")@PathVariable("id") Long orderId) {
         return BeanUtils.copyBean(orderService.getById(orderId), OrderVO.class);
+    }
+
+    @ApiOperation("分页查询订单（商户端，可按状态筛选）")
+    @GetMapping("/page")
+    public PageDTO<OrderVO> queryOrderByPage(PageQuery query,
+                                             @RequestParam(value = "status", required = false) Integer status) {
+        return orderService.queryOrderByPage(query, status);
     }
 
     @ApiOperation("创建订单")

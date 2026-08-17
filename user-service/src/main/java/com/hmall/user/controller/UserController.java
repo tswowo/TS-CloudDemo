@@ -25,6 +25,12 @@ public class UserController {
         return userService.login(loginFormDTO);
     }
 
+    @ApiOperation("商户登录接口（管理端）")
+    @PostMapping("admin/login")
+    public UserLoginVO adminLogin(@RequestBody @Validated LoginFormDTO loginFormDTO){
+        return userService.adminLogin(loginFormDTO);
+    }
+
     @ApiOperation("扣减余额")
     @ApiImplicitParams({
             @ApiImplicitParam(name = "pw", value = "支付密码"),

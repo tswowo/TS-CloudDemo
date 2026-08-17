@@ -14,8 +14,16 @@ spring:
     nacos:
       discovery:
         server-addr: ${hm.nacos.host}:${hm.nacos.port}
+  redis:
+    host: localhost
+    port: 6379
 
 hm:
   swagger:
     title: "黑马商城商品管理接口文档"
     package: com.hmall.item.controller
+  oss:
+    endpoint: oss-cn-hangzhou.aliyuncs.com
+    accessKeyId: ${HM_OSS_ACCESS_KEY_ID:}
+    accessKeySecret: ${HM_OSS_ACCESS_KEY_SECRET:}
+    bucketName: ${HM_OSS_BUCKET:}

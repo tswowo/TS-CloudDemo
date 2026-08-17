@@ -8,4 +8,5 @@ public class UserLoginVO {
     private Long userId;
     private String username;
     private Integer balance;
+    private Integer role;
 }

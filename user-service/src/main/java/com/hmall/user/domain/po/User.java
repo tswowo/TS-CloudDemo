@@ -62,5 +62,9 @@ public class User implements Serializable {
      */
     private Integer balance;
 
+    /**
+     * 角色（1普通用户 2商户），DDL: ALTER TABLE `user` ADD COLUMN role tinyint NOT NULL DEFAULT 1 COMMENT '角色 1用户 2商户';
+     */
+    private Integer role;
 
 }

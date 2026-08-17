@@ -15,5 +15,9 @@ hm:
     excludePaths:
       - /search/**
       - /users/login
+      - /users/admin/login
       - /items/**
       - /hi
+    adminPaths:
+      - /orders/page
+      - /upload/**

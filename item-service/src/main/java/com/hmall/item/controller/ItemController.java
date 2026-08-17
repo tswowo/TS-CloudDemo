@@ -42,7 +42,7 @@ public class ItemController {
     @ApiOperation("根据id查询商品")
     @GetMapping("{id}")
     public ItemDTO queryItemById(@PathVariable("id") Long id) {
-        return BeanUtils.copyBean(itemService.getById(id), ItemDTO.class);
+        return itemService.queryItemById(id);
     }
 
     @ApiOperation("新增商品")
@@ -74,6 +74,12 @@ public class ItemController {
     @DeleteMapping("{id}")
     public void deleteItemById(@PathVariable("id") Long id) {
         itemService.removeById(id);
+    }
+
+    @ApiOperation("修改商品库存（商户端）")
+    @PutMapping("/stock/{id}")
+    public void setStock(@PathVariable("id") Long id, @RequestParam("stock") Integer stock) {
+        itemService.setStock(id, stock);
     }
 
     @ApiOperation("批量扣减库存")

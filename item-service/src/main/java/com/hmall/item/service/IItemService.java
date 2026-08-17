@@ -22,5 +22,9 @@ public interface IItemService extends IService<Item> {
 
     List<ItemDTO> queryItemByIds(Collection<Long> ids);
 
+    ItemDTO queryItemById(Long id);
+
     void restoreStock(List<OrderDetailDTO> items);
+
+    void setStock(Long id, Integer stock);
 }

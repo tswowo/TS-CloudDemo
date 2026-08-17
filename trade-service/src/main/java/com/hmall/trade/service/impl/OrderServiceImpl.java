@@ -15,8 +15,12 @@ import com.hmall.trade.domain.po.OrderDetail;
 import com.hmall.trade.mapper.OrderMapper;
 import com.hmall.trade.service.IOrderDetailService;
 import com.hmall.trade.service.IOrderService;
+import com.hmall.common.domain.PageDTO;
+import com.hmall.common.domain.PageQuery;
+import com.hmall.trade.domain.vo.OrderVO;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
-//import io.seata.spring.annotation.GlobalTransactional;
+import io.seata.spring.annotation.GlobalTransactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
@@ -50,7 +54,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Override
     @Transactional
-//    @GlobalTransactional(timeoutMills = 300000, name = "createOrder")
+    @GlobalTransactional(timeoutMills = 300000, name = "createOrder")
     public Long createOrder(OrderFormDTO orderFormDTO) {
         // 1.订单数据
         Order order = new Order();
@@ -130,6 +134,15 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 恢复扣减的库存
         List<OrderDetailDTO> items = orderMapper.queryOrderItemsByOrderId(orderId);
         itemClient.restoreStock(items);
+    }
+
+    @Override
+    public PageDTO<OrderVO> queryOrderByPage(PageQuery query, Integer status) {
+        // 商户端分页查询订单，可按状态筛选，默认按创建时间倒序
+        Page<Order> page = lambdaQuery()
+                .eq(status != null, Order::getStatus, status)
+                .page(query.toMpPageDefaultSortByCreateTimeDesc());
+        return PageDTO.of(page, OrderVO.class);
     }
 
     private List<OrderDetail> buildDetails(Long orderId, List<ItemDTO> items, Map<Long, Integer> numMap) {
