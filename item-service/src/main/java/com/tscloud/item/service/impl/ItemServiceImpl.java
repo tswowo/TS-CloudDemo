@@ -55,6 +55,11 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
 
     /** 商品缓存 key 前缀 */
     private static final String ITEM_CACHE_PREFIX = "item:id:";
+    /** 下架空值标记：布隆过滤器不能删除元素，下架商品的残留位在每日重建前仍会命中，
+     * 写短 TTL 空值让下架商品立即失效，查询直接返回 null 不打数据库 */
+    private static final String ITEM_CACHE_EMPTY = "empty";
+    /** 下架空值标记 TTL：覆盖下架后的流量高峰即可，残留位靠每日布隆重建清除 */
+    private static final long ITEM_CACHE_EMPTY_TTL_MINUTES = 5;
     /** 库存锁 key 前缀 */
     private static final String STOCK_LOCK_PREFIX = "lock:stock:";
     /** 缓存基础有效期 30 分钟，实际 TTL = 基础 + 随机 0~5 分钟（错开过期时间，防缓存雪崩） */
@@ -87,7 +92,9 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
     public boolean removeById(Serializable id) {
         boolean success = super.removeById(id);
         if (success) {
-            deleteItemCache((Long) id);
+            Long itemId = (Long) id;
+            deleteItemCache(itemId);
+            markItemRemoved(itemId);
         }
         return success;
     }
@@ -140,6 +147,9 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
             String key = ITEM_CACHE_PREFIX + id;
             String json = redisTemplate.opsForValue().get(key);
             if (json != null) {
+                if (ITEM_CACHE_EMPTY.equals(json)) {
+                    return null;  // 命中下架空值标记，直接返回，不打数据库
+                }
                 return JSONUtil.toBean(json, ItemDTO.class);
             }
             // 布隆过滤防穿透：判定一定不存在的 id 直接返回，不打数据库（未初始化时放行降级）
@@ -260,6 +270,9 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
         for (int i = 0; i < idList.size(); i++) {
             String json = cachedJsons == null ? null : cachedJsons.get(i);
             if (json != null) {
+                if (ITEM_CACHE_EMPTY.equals(json)) {
+                    continue;  // 命中下架空值标记：不进结果集也不回源
+                }
                 resultMap.put(idList.get(i), JSONUtil.toBean(json, ItemDTO.class));
             } else {
                 missIds.add(idList.get(i));
@@ -315,6 +328,16 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
             if (stock == null || stock < item.getNum()) {
                 throw new BizIllegalException("库存不足！");
             }
+        }
+    }
+
+    /** 下架商品：写短 TTL 空值标记，覆盖布隆残留位窗口（凌晨重建前的查询不再打库） */
+    private void markItemRemoved(Long id) {
+        try {
+            redisTemplate.opsForValue().set(ITEM_CACHE_PREFIX + id, ITEM_CACHE_EMPTY,
+                    ITEM_CACHE_EMPTY_TTL_MINUTES, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.error("写入商品下架空值标记失败, id={}", id, e);
         }
     }
 
