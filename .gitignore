@@ -36,3 +36,5 @@ target/
 /item-service/logs/
 /search-service/src/main/resources/application-dev.yaml
 /search-service/src/main/resources/application-local.yaml
+/docs/面试讲解稿.md
+/docs/面试讲解稿.pdf
