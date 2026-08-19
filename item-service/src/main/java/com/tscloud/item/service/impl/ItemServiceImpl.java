@@ -7,7 +7,6 @@ import com.tscloud.common.exception.BizIllegalException;
 import com.tscloud.common.utils.BeanUtils;
 import com.tscloud.common.utils.CollUtils;
 import com.tscloud.common.utils.RabbitMqHelper;
-import com.tscloud.common.utils.RedisLockHelper;
 import com.tscloud.item.annotation.ItemSync;
 import com.tscloud.item.constants.MqConstants;
 import com.tscloud.item.domain.dto.ItemDTO;
@@ -18,6 +17,8 @@ import com.tscloud.item.mapper.ItemMapper;
 import com.tscloud.item.service.IItemService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -30,7 +31,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -48,9 +48,10 @@ import java.util.stream.Collectors;
 public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements IItemService {
 
     private final StringRedisTemplate redisTemplate;
-    private final RedisLockHelper redisLockHelper;
+    private final RedissonClient redissonClient;
     private final RabbitTemplate rabbitTemplate;
     private final ItemStockService itemStockService;
+    private final ItemBloomService itemBloomService;
 
     /** 商品缓存 key 前缀 */
     private static final String ITEM_CACHE_PREFIX = "item:id:";
@@ -58,14 +59,14 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
     private static final String STOCK_LOCK_PREFIX = "lock:stock:";
     /** 缓存基础有效期 30 分钟，实际 TTL = 基础 + 随机 0~5 分钟（错开过期时间，防缓存雪崩） */
     private static final long ITEM_CACHE_TTL_SECONDS = 30 * 60;
-    /** 库存锁过期时间：持锁方宕机时靠它自动释放，防止死锁 */
-    private static final long STOCK_LOCK_EXPIRE_SECONDS = 10;
 
     @Override
     @ItemSync(operation = Operation.SAVE)
     public boolean save(Item entity) {
         boolean success = super.save(entity);
         if (success) {
+            // 新商品加入布隆过滤器，保证新增后立即可被查询到
+            itemBloomService.add(entity.getId());
             deleteItemCache(entity.getId());
         }
         return success;
@@ -95,26 +96,25 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
     public void deductStock(List<OrderDetailDTO> items) {
         // 合并相同商品的明细并排序：同一商品只加一次锁，且所有请求加锁顺序一致，避免死锁
         List<OrderDetailDTO> merged = mergeAndSort(items);
-        String lockValue = UUID.randomUUID().toString();
-        List<Long> lockedIds = new ArrayList<>();
+        List<RLock> locks = new ArrayList<>();
         try {
             for (OrderDetailDTO item : merged) {
-                String lockKey = STOCK_LOCK_PREFIX + item.getItemId();
-                if (!redisLockHelper.tryLock(lockKey, lockValue, STOCK_LOCK_EXPIRE_SECONDS)) {
+                RLock lock = redissonClient.getLock(STOCK_LOCK_PREFIX + item.getItemId());
+                if (!tryLock(lock)) {
                     throw new BizIllegalException("系统繁忙，请稍后再试！");
                 }
-                lockedIds.add(item.getItemId());
+                locks.add(lock);
             }
             // 持锁后预校验库存：任一商品不足，在扣减发生前直接失败，不会产生部分扣减
             checkStock(merged);
             // 锁包事务：独立 Bean 的事务方法任一条失败整体回滚；事务提交后本方法 finally 才释放锁
             itemStockService.deductWithTx(merged);
             // 库存已变化，删除商品缓存，防止读到旧库存
-            lockedIds.forEach(this::deleteItemCache);
+            merged.forEach(item -> deleteItemCache(item.getItemId()));
         } finally {
             // 逆序释放，保证持锁期间后续请求按序竞争
-            for (int i = lockedIds.size() - 1; i >= 0; i--) {
-                redisLockHelper.unlock(STOCK_LOCK_PREFIX + lockedIds.get(i), lockValue);
+            for (int i = locks.size() - 1; i >= 0; i--) {
+                locks.get(i).unlock();
             }
         }
     }
@@ -142,12 +142,15 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
             if (json != null) {
                 return JSONUtil.toBean(json, ItemDTO.class);
             }
+            // 布隆过滤防穿透：判定一定不存在的 id 直接返回，不打数据库（未初始化时放行降级）
+            if (!itemBloomService.mayContain(id)) {
+                return null;
+            }
             // 缓存未命中：互斥锁防击穿，只有一个请求回源查库建缓存，其余等锁后重读
-            String lockKey = "lock:cache:" + id;
-            String lockValue = UUID.randomUUID().toString();
+            RLock lock = redissonClient.getLock("lock:cache:" + id);
             boolean locked = false;
             try {
-                if (redisLockHelper.tryLock(lockKey, lockValue, 10)) {
+                if (tryLock(lock)) {
                     locked = true;
                     // 双重检查：拿到锁后缓存可能已被上一个持锁者重建
                     json = redisTemplate.opsForValue().get(key);
@@ -173,7 +176,7 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
                 return item == null ? null : BeanUtils.copyBean(item, ItemDTO.class);
             } finally {
                 if (locked) {
-                    redisLockHelper.unlock(lockKey, lockValue);
+                    lock.unlock();
                 }
             }
         } catch (InterruptedException e) {
@@ -192,41 +195,56 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
         if (stock == null || stock < 0) {
             throw new BadRequestException("库存不能为空或负数");
         }
-        String lockKey = STOCK_LOCK_PREFIX + id;
-        String lockValue = UUID.randomUUID().toString();
+        // 与扣减/恢复共用同一把商品锁，防止"商户设置库存"与"用户扣减"并发时丢失更新
+        RLock lock = redissonClient.getLock(STOCK_LOCK_PREFIX + id);
+        boolean locked = false;
         try {
-            // 与扣减/恢复共用同一把商品锁，防止"商户设置库存"与"用户扣减"并发时丢失更新
-            if (!redisLockHelper.tryLock(lockKey, lockValue, STOCK_LOCK_EXPIRE_SECONDS)) {
+            locked = tryLock(lock);
+            if (!locked) {
                 throw new BizIllegalException("系统繁忙，请稍后再试！");
             }
             baseMapper.setStock(id, stock);
             deleteItemCache(id);
         } finally {
-            redisLockHelper.unlock(lockKey, lockValue);
+            if (locked) {
+                lock.unlock();
+            }
         }
     }
 
     @Override
     public void restoreStock(List<OrderDetailDTO> items) {
         List<OrderDetailDTO> merged = mergeAndSort(items);
-        String lockValue = UUID.randomUUID().toString();
-        List<Long> lockedIds = new ArrayList<>();
+        List<RLock> locks = new ArrayList<>();
         try {
             for (OrderDetailDTO item : merged) {
-                String lockKey = STOCK_LOCK_PREFIX + item.getItemId();
-                if (!redisLockHelper.tryLock(lockKey, lockValue, STOCK_LOCK_EXPIRE_SECONDS)) {
+                RLock lock = redissonClient.getLock(STOCK_LOCK_PREFIX + item.getItemId());
+                if (!tryLock(lock)) {
                     throw new BizIllegalException("系统繁忙，请稍后再试！");
                 }
-                lockedIds.add(item.getItemId());
+                locks.add(lock);
             }
             // 锁包事务：恢复走独立 Bean 的事务方法
             itemStockService.restoreWithTx(merged);
             // 库存已变化，删除商品缓存
-            lockedIds.forEach(this::deleteItemCache);
+            merged.forEach(item -> deleteItemCache(item.getItemId()));
         } finally {
-            for (int i = lockedIds.size() - 1; i >= 0; i--) {
-                redisLockHelper.unlock(STOCK_LOCK_PREFIX + lockedIds.get(i), lockValue);
+            for (int i = locks.size() - 1; i >= 0; i--) {
+                locks.get(i).unlock();
             }
+        }
+    }
+
+    /**
+     * 尝试加锁：waitTime=0 拿不到立即返回 false；leaseTime=-1 开启看门狗，
+     * 默认 30s 过期、每 10s 自动续期，业务没执行完锁不会提前释放。
+     */
+    private boolean tryLock(RLock lock) {
+        try {
+            return lock.tryLock(0, -1, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 
@@ -246,6 +264,10 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, Item> implements II
             } else {
                 missIds.add(idList.get(i));
             }
+        }
+        if (!missIds.isEmpty()) {
+            // 布隆过滤防穿透：判定不存在的 id 不打数据库（未初始化时放行降级）
+            missIds.removeIf(missId -> !itemBloomService.mayContain(missId));
         }
         if (!missIds.isEmpty()) {
             List<Item> dbItems = listByIds(missIds);

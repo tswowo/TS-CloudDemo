@@ -87,9 +87,9 @@ public interface ItemClient {
 }
 ```
 
-> **提交 `41db124`**: 修复 OkHttp 连接池依赖丢失
+> **提交 `88771b4` → `ac9257b`**: OkHttp 连接池依赖丢失与修复
 
-在抽取 api-service 时误删了 OkHttp 依赖，导致 Feign 静默降级为 `HttpURLConnection`。**重点**：连接池失效不会报错，只会让每次请求都新建连接，高并发下产生大量 `TIME_WAIT` 状态连接，性能急剧下降。排查时可通过日志查看 Feign 实际使用的 Client 类型。
+在抽取 api 模块（88771b4）时误删了 OkHttp 依赖，导致 Feign 静默降级为 `HttpURLConnection`。**重点**：连接池失效不会报错，只会让每次请求都新建连接，高并发下产生大量 `TIME_WAIT` 状态连接，性能急剧下降。断点排查发现实际走的是 HttpURLConnection，最终在 ac9257b 把 `feign-okhttp` 依赖加回 api 模块修复，下游服务通过传递依赖重新获得连接池。
 
 > **提交 `ac9257b`**: 拆分支付模块（pay-service）和交易模块（trade-service）
 
